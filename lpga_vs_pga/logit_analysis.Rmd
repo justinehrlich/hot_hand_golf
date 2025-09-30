@@ -1,0 +1,447 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-08-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Improvements: add standings within round/tournament as a control
+
+
+
+
+
+There are a couple things we can consider I think:
+
+1. Green in regulation or putting - a chance of making one putt on the green is extremely high unless they put within 5 feet. So, there are many players would hit a good shot, but it doesn't always connect with a good score. So, if we have access to GIR data or Putting data on those holes, missing or hitting greens might explain/moderate the result. 
+We don't have this.
+
+2. Existence of penalty areas on holes - if there are hazards and out of bounds on certain holes, players would have a higher chance to make double bogey or higher with one simple mistake.
+Great idea - we should see if a student can get this.
+
+3. Tournament Standing or round - it would be interesting to see some patterns based on each round or standing - Round 2 vs Round 3 before and after make a cut, Top 30 vs Top 10, Top 5 
+Great idea - should control for round.
+
+Knowing that the best shots don't always connect with good results and bad shots don't always create the worst outcome, these factors may explain those percentages better. 
+
+Last thing I would love to look at if possible or accessible, the time players spend on those holes - whether having good or bad streaks. It would really relate to hot hand study I believe. 
+I think this might be possible - it will require some data cleaning.
+
+```{r}
+
+
+library(tidyverse)
+library(sjPlot)
+library(butcher)
+library(stargazer)
+library(gtsummary)
+library(glmmTMB)
+library(fixest)
+library(lubridate)
+
+
+scorecards_cleaned_pga <-read_csv("../data/PGA_Scorecards_scorecards_cleaned.csv") %>% mutate(RoundPar = as.character(RoundPar))
+scorecards_cleaned_lpga <- read_csv("../data/LPGA_Scorecards_scorecards_cleaned.csv") %>% mutate(RoundPar = as.character(RoundPar))
+#scorecards_cleaned_liv <- read_csv("../data/LIV_Tour_Scorecards_scorecards_cleaned.csv")
+#scorecards_cleaned_dp <- read_csv("../data/DP_Tour_Scorecards2_scorecards_cleaned.csv")
+
+scorecards_cleaned_all <- bind_rows(scorecards_cleaned_pga, scorecards_cleaned_lpga)
+scorecards_cleaned_all %>% mutate(year = as.numeric(season), holeOrderNumber = as.numeric(Player_Hole_Number)) -> scorecards_cleaned_all
+scorecards_cleaned_all %>% filter(year >= (max(year, na.rm=T)-3)) %>% filter(year < max(year, na.rm=T)) -> scorecards_cleaned_all
+
+#removed "_Scorecards" from orgId
+scorecards_cleaned_all %>% mutate(orgId = gsub("_Scorecards", "", orgId)) -> scorecards_cleaned_all
+scorecards_cleaned_all %>% filter(orgId %in% c("PGA", "LPGA")) -> scorecards_cleaned_all
+scorecards_cleaned_all$orgId <- factor(
+  scorecards_cleaned_all$orgId,
+  levels = c("PGA", "LPGA")
+)
+
+
+# min_tournaments_per_year <- 2
+# scorecards_cleaned_all %>% group_by(playerId, year, tournId, orgId) %>% summarize(n = n()) %>% ungroup() %>% group_by(playerId, year) %>% summarize(n_tournaments = n()) %>% filter(n_tournaments >= min_tournaments_per_year) -> player_years
+# scorecards_cleaned_all %>% inner_join(player_years, by = c("playerId", "year")) -> scorecards_cleaned_all
+
+
+#turn off scientific notation
+options(scipen=999)
+
+#set previous_bucket_hole_outcome as reference level
+scorecards_cleaned_all$previous_bucket_hole_outcome <- as.factor(scorecards_cleaned_all$previous_bucket_hole_outcome)
+scorecards_cleaned_all$previous_bucket_hole_outcome <- relevel(scorecards_cleaned_all$previous_bucket_hole_outcome, ref = "par_or_birdie_or_bogey")
+
+scorecards_cleaned_all$previous_large_bucket_hole_outcome <- as.factor(scorecards_cleaned_all$previous_large_bucket_hole_outcome)
+scorecards_cleaned_all$previous_large_bucket_hole_outcome <- relevel(scorecards_cleaned_all$previous_large_bucket_hole_outcome, ref = "par")
+
+scorecards_cleaned_all$previous_hole_outcome <- as.factor(scorecards_cleaned_all$previous_hole_outcome)
+scorecards_cleaned_all$previous_hole_outcome <- relevel(scorecards_cleaned_all$previous_hole_outcome, ref = "par")
+
+
+scorecards_cleaned_all %>% group_by(previous_bucket_hole_outcome) %>% summarize(mean_strokes_gained = mean(strokes_gained, na.rm = T), mean_strokes_gained_above_average = mean(strokes_gained_above_average, na.rm = T))
+
+
+scorecards_cleaned_all %>% mutate(double_bogey_or_worst = ifelse(bucket_hole_outcome == "double_bogey_or_worst", 1, 0)) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% mutate(eagle_or_better = ifelse(bucket_hole_outcome == "eagle_or_better", 1, 0)) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% mutate(bogey_or_worst = ifelse(large_bucket_hole_outcome == "bogey_or_worst", 1, 0)) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% mutate(birdie_or_better = ifelse(large_bucket_hole_outcome == "birdie_or_better", 1, 0)) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% mutate(average_strokes_above_par = hole_avg - as.numeric(as.character(par))) -> scorecards_cleaned_all
+
+scorecards_cleaned_all%>% group_by(previous_bucket_hole_outcome) %>% summarize(mean_strokes_gained = mean(strokes_gained, na.rm = T), mean_strokes_gained_above_average = mean(strokes_gained_above_average, na.rm = T), double_bogey_or_worst = mean(double_bogey_or_worst, na.rm = T), eagle_or_better = mean(eagle_or_better, na.rm = T))
+
+scorecards_cleaned_all%>% group_by(previous_bucket_hole_outcome) %>% summarize(mean_true_trokes_gained = mean(true_strokes_gained, na.rm = T), mean_true_strokes_gained_above_average = mean(true_strokes_gained_above_average, na.rm = T), double_bogey_or_worst = mean(double_bogey_or_worst, na.rm = T), eagle_or_better = mean(eagle_or_better, na.rm = T))
+
+
+
+scorecards_cleaned_all %>% mutate(previous_double_bogey_or_worst = as.factor(ifelse(previous_bucket_hole_outcome == "double_bogey_or_worst", 1, 0))) -> scorecards_cleaned_all
+scorecards_cleaned_all %>% mutate(previous_eagle_or_better = as.factor(ifelse(previous_bucket_hole_outcome == "eagle_or_better", 1, 0))) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% mutate(previous_bogey_or_worst = as.factor(ifelse(previous_large_bucket_hole_outcome == "bogey_or_worst", 1, 0))) -> scorecards_cleaned_all
+scorecards_cleaned_all %>% mutate(previous_birdie_or_better = as.factor(ifelse(previous_large_bucket_hole_outcome == "birdie_or_better", 1, 0))) -> scorecards_cleaned_all
+
+
+scorecards_cleaned_all <- scorecards_cleaned_all %>%
+  mutate(
+    par_num   = as.numeric(as.character(par)),
+    round_no  = parse_number(as.character(roundId)),
+    score_rel_to_par = holeScore - par_num
+  )
+
+##### add round level standings
+
+
+round_scores <- scorecards_cleaned_all %>%
+  filter(!is.na(score_rel_to_par), !is.na(round_no)) %>%
+  group_by(season, tournId, playerId, round_no) %>%
+  summarise(round_score_rel_to_par = sum(score_rel_to_par, na.rm = TRUE), .groups = "drop")
+
+cum_by_round_end <- round_scores %>%
+  group_by(season, tournId, playerId) %>%
+  arrange(round_no, .by_group = TRUE) %>%
+  mutate(cum_rel_to_par_end = cumsum(round_score_rel_to_par)) %>%
+  ungroup()
+
+start_of_round <- cum_by_round_end %>%
+  group_by(season, tournId, playerId) %>%
+  arrange(round_no, .by_group = TRUE) %>%
+  mutate(cum_rel_to_par_start = dplyr::lag(cum_rel_to_par_end, default = 0)) %>%
+  ungroup()
+
+standings_by_round <- start_of_round %>%
+  group_by(season, tournId, round_no) %>%
+  mutate(
+    standing_start_of_round = min_rank(cum_rel_to_par_start),
+    leader_start_score      = min(cum_rel_to_par_start, na.rm = TRUE),
+    strokes_back_start      = cum_rel_to_par_start - leader_start_score
+  ) %>%
+  ungroup() %>%
+  group_by(season, tournId, round_no) %>%
+  mutate(
+    standing_end_of_round = min_rank(cum_rel_to_par_end),
+    leader_end_score      = min(cum_rel_to_par_end, na.rm = TRUE),
+    strokes_back_end      = cum_rel_to_par_end - leader_end_score
+  ) %>%
+  ungroup() %>%
+  mutate(
+    pos_start_str = paste0(ifelse(duplicated(standing_start_of_round) |
+                                  standing_start_of_round %in% standing_start_of_round[duplicated(standing_start_of_round)],
+                                  "T", ""), standing_start_of_round),
+    pos_end_str   = paste0(ifelse(duplicated(standing_end_of_round) |
+                                  standing_end_of_round %in% standing_end_of_round[duplicated(standing_end_of_round)],
+                                  "T", ""), standing_end_of_round)
+  )
+
+#standings_by_round %>% mutate(pos_start_str = ifelse(round_no < 4, "1-3 Round", pos_start_str)) -> standings_by_round #set first round position to "First Round"
+
+scorecards_cleaned_all <- scorecards_cleaned_all %>%
+  left_join(
+    standings_by_round %>%
+      select(season, tournId, playerId, round_no,
+             round_score_rel_to_par,
+             cum_rel_to_par_start, standing_start_of_round, strokes_back_start, pos_start_str,
+             cum_rel_to_par_end,   standing_end_of_round,   strokes_back_end,   pos_end_str),
+    by = c("season", "tournId", "playerId", "round_no")
+  )
+
+
+
+####### add hole level standings
+
+scorecards_cleaned_all %>% mutate(tournamentHoleOrderNumber = 18*(roundId-1)+Player_Hole_Number) -> scorecards_cleaned_all
+
+tournament_cum_scores <- scorecards_cleaned_all %>%
+  filter(!is.na(score_rel_to_par), !is.na(round_no)) %>%
+  group_by(season, tournId, playerId) %>%
+  arrange(tournamentHoleOrderNumber, .by_group = TRUE) %>%
+  mutate(cum_rel_to_par_hole = lag(cumsum(score_rel_to_par), default = 0)) %>%
+  ungroup()
+
+standings_by_hole <- tournament_cum_scores %>%
+  group_by(season, tournId, tournamentHoleOrderNumber) %>%   
+  mutate(
+    standing_hole     = min_rank(cum_rel_to_par_hole),
+    leader_hole       = min(cum_rel_to_par_hole, na.rm = TRUE),
+    strokes_back_hole = cum_rel_to_par_hole - leader_hole
+  ) %>%
+  add_count(standing_hole, name = "n_at_pos") %>%
+  mutate(
+    pos_hole_str = if_else(n_at_pos > 1, paste0("T", standing_hole), as.character(standing_hole))
+  ) %>%
+  select(-n_at_pos) %>%
+  ungroup()
+
+scorecards_cleaned_all <- scorecards_cleaned_all %>%
+  left_join(
+    standings_by_hole %>%
+      select(season, tournId, playerId, tournamentHoleOrderNumber,
+             cum_rel_to_par_hole, standing_hole, strokes_back_hole, pos_hole_str),
+    by = c("season", "tournId", "playerId", "tournamentHoleOrderNumber")
+  )
+
+#scorecards_cleaned_all %>% mutate(pos_hole_str = ifelse(round_no < 4, "Round1-3", pos_hole_str)) -> scorecards_cleaned_all
+###############
+
+
+
+
+scorecards_cleaned_all %>% mutate(roundId = as.factor(roundId), season = as.factor(season), par = as.factor(par)) -> scorecards_cleaned_all
+
+
+
+scorecards_cleaned_all %>% mutate(StartDate = mdy(StartDate), EndDate = mdy(EndDate)) -> scorecards_cleaned_all
+scorecards_cleaned_all %>% mutate(Date = StartDate + (round_no-1)) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% saveRDS("data/scorecards_cleaned_all.rds")
+scorecards_cleaned_all <- readRDS("data/scorecards_cleaned_all.rds")
+
+scorecards_cleaned_all %>% group_by(par) %>% mutate(n_shots = n()) %>% ungroup() %>% group_by(par, previous_large_bucket_hole_outcome) %>% summarize(n_cases = n(), n_shots = first(n_shots)) %>% mutate(prob = n_cases/n_shots)
+
+scorecards_cleaned_all %>% mutate(previous_birdie_or_better = as.numeric(as.character(previous_birdie_or_better)), previous_bogey_or_worst = as.numeric(as.character(previous_bogey_or_worst))) %>%  filter(!is.na(par)) %>% select(season, previous_birdie_or_better, previous_bogey_or_worst, par, strokes_gained, birdie_or_better, bogey_or_worst, ) %>% 
+  tbl_summary(missing = "no", by = par)
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+
+
+#https://pmc.ncbi.nlm.nih.gov/articles/PMC3187751/
+
+
+
+
+scorecards_cleaned_all %>% group_by(year, previous_eagle_or_better) %>% summarize(mean_strokes_gained = mean(strokes_gained, na.rm = T),
+                                                                             p_eagle_or_better = mean(eagle_or_better, na.rm = T)) -> eagle_or_better_aggregate_tidy
+
+
+scorecards_cleaned_all %>% group_by(year, previous_double_bogey_or_worst) %>% summarize(mean_strokes_gained = mean(strokes_gained, na.rm = T),
+                                                                             p_double_bogey_or_worst = mean(double_bogey_or_worst, na.rm = T)) -> double_bogey_or_worst_aggregate_tidy
+
+scorecards_cleaned_all %>% group_by(year, previous_birdie_or_better) %>% summarize(mean_strokes_gained = mean(strokes_gained, na.rm = T),
+                                                                             p_birdie_or_better = mean(birdie_or_better, na.rm = T)) -> birdie_or_better_aggregate_tidy
+
+scorecards_cleaned_all %>% group_by(year, previous_bogey_or_worst) %>% summarize(mean_strokes_gained = mean(strokes_gained, na.rm = T),
+                                                                             p_bogey_or_worst = mean(bogey_or_worst, na.rm = T)) -> bogey_or_worst_aggregate_tidy
+
+pdf("visualizations/conditional_prob.pdf")
+
+
+
+scorecards_cleaned_all %>% filter(!is.na(previous_birdie_or_better)) %>%
+  ggplot(aes(x = strokes_gained, fill = factor(previous_birdie_or_better))) +
+  geom_density(alpha = 0.5) +
+  labs(fill = "Previous Birdie?", title = "Figure 1: Distribution of Strokes Gained by Previous Hole Outcome", subtitle = "PGA golfers play more conservatively after a birdie, as reflected by a leftward shift in strokes gained.\nLPGA golfers, however, show the opposite tendency.") + facet_wrap(~orgId) + theme_bw() + coord_cartesian(xlim = c(-2, 2)) + scale_fill_manual(values = c("0" = "blue", "1" = "red"), labels = c("0" = "No", "1" = "Yes"))
+
+  
+
+
+
+
+eagle_or_better_aggregate_tidy %>% mutate(year = as.factor(year)) %>% ggplot(aes(x = previous_eagle_or_better, y = mean_strokes_gained, color = year)) + geom_point() + geom_smooth(method = "lm") + theme_minimal() + ggtitle("Strokes Gained Conditional on Previous Eagle or Better Aggregate Level")
+
+
+double_bogey_or_worst_aggregate_tidy %>% mutate(year = as.factor(year)) %>% ggplot(aes(x = previous_double_bogey_or_worst, y = mean_strokes_gained, color = year)) + geom_point() + geom_smooth(method = "lm") + theme_minimal() + ggtitle("Strokes Gained Conditional on Previous Double Bogey or Worst Aggregate Level")
+
+eagle_or_better_aggregate_tidy %>% mutate(year = as.factor(year)) %>% ggplot(aes(x = previous_eagle_or_better, y = p_eagle_or_better, color = year)) + geom_point() + geom_smooth(method = "lm") + theme_minimal() + ggtitle("Eagle or Better Conditional Probability Aggregate Level")
+
+
+double_bogey_or_worst_aggregate_tidy %>% mutate(year = as.factor(year)) %>% ggplot(aes(x = previous_double_bogey_or_worst, y = p_double_bogey_or_worst, color = year)) + geom_point() + geom_smooth(method = "lm") + theme_minimal() + ggtitle("Double Bogey or Worst Conditional Probability")
+
+birdie_or_better_aggregate_tidy %>% mutate(year = as.factor(year)) %>% ggplot(aes(x = previous_birdie_or_better, y = p_birdie_or_better, color = year)) + geom_point() + geom_smooth(method = "lm") + theme_minimal() + ggtitle("Birdie or Better Conditional Probability")
+
+bogey_or_worst_aggregate_tidy %>% mutate(year = as.factor(year)) %>% ggplot(aes(x = previous_bogey_or_worst, y = p_bogey_or_worst, color = year)) + geom_point() + geom_smooth(method = "lm") + theme_minimal() + ggtitle("Bogey or Worst Conditional Probability")
+
+
+dev.off()
+```
+
+
+
+
+
+
+```{r}
+
+
+
+scorecards_cleaned_all %>% filter(!is.na(playerId)) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% mutate(strokes_back_hole = as.character(strokes_back_hole)) -> scorecards_cleaned_all
+
+scorecards_cleaned_all %>% mutate(previous_bogey_or_worst = as.numeric(as.character(previous_bogey_or_worst)), previous_birdie_or_better = as.numeric(as.character(previous_birdie_or_better))) -> scorecards_cleaned_all
+scorecards_cleaned_all %>% mutate(standing_hole = as.factor(standing_hole)) -> scorecards_cleaned_all
+
+
+
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_1
+
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_2
+
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial(), fixef.rm = "singleton") -> glm_bogey_or_worst_model_3
+
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_4
+
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId + standing_hole, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_5
+
+
+
+
+glm_bogey_or_worst_model_1 -> m1
+glm_bogey_or_worst_model_2 -> m2
+glm_bogey_or_worst_model_3 -> m3
+glm_bogey_or_worst_model_4 -> m4
+glm_bogey_or_worst_model_5 -> m5
+
+# install.packages("modelsummary")
+library(modelsummary)
+
+
+
+
+
+# Put your models in a named list in the order you want
+models <- list(
+  "No FE"                       = m1,
+  "Event Round FE"              = m4,
+  "Player FE"                   = m2,
+  "Player + Event Round FE"     = m3,
+  "Player + Event Round FE + Hole Standings" = m5
+)
+etable(m1, m4, m2, m3, m5, headers = c("No FE", "Event Round FE", "Player FE",  "Player + Event Round FE", "Player + Event Round FE + Hole Standings"), tex = TRUE, export = "~/glm_bogey_or_worst.png")
+# Create an HTML (or LaTeX) table
+
+library(car)
+
+gof_function_gof <- function(model){
+
+  return(tibble("Log Likelihood" = round(model$loglik,3)))
+}
+
+gof_function_gof_all <- function(model){
+  all_vif_below_2 <- "Some are > 2.0"
+  if(vif(model)[,1] %>% as.numeric() %>% max() < 2){
+    all_vif_below_2 <- "All < 2.0"
+  }
+  return(tibble("Pseudo Adj R²" = round(model$pseudo_r2,3), "Log Likelihood" = round(model$loglik,3), "VIF()" = all_vif_below_2))
+}
+
+
+modelsummary(
+  models,
+  output         = "tables/glm_bogey_or_worst_optimized.html",
+  statistic      = NULL,     # show just SEs
+  estimate       = "{estimate} ({std.error}){stars}",    # show just the coefficient
+  fmt            = 3,               # 3 digits
+  gof_omit        = "BIC|Std.Errors|RMSE|R2|R2 Adj.",              # drop goodness-of-fit if you like
+  coef_rename    = c(               # optional: nicer row names
+    previous_birdie_or_better   = "Prev. Birdie",
+    average_strokes_above_par   = "Avg. Strokes Above Par",
+    par                          = "Hole Par"
+  ),
+  stars          = TRUE,            # significance stars
+  exponentiate       = TRUE,             # exponentiate coefficients,
+    notes         = "Significance: * p<0.1; ** p<0.05; *** p<0.01",
+  note_position = "bottom",
+  gof_function = gof_function_gof,
+)
+
+
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_1
+
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | playerId^season, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_2
+
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par  | playerId^season + orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_3
+
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_4
+
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId + standing_hole , data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_5
+
+
+
+
+glm_birdie_or_better_model_1 -> m1
+glm_birdie_or_better_model_2 -> m2
+glm_birdie_or_better_model_3 -> m3
+glm_birdie_or_better_model_4 -> m4
+glm_birdie_or_better_model_5 -> m5
+
+
+
+# Put your models in a named list in the order you want
+models <- list(
+  "No FE"                       = m1,
+  "Event Round FE"              = m4,
+  "Player FE"                   = m2,
+  "Player + Event Round FE"     = m3,
+  "Player + Event Round FE + Hole Standings" = m5
+)
+
+# Create an HTML (or LaTeX) table
+modelsummary(
+  models,
+  output         = "tables/glm_birdie_or_better_optimized.html",
+   statistic      = NULL,     # show just SEs
+  estimate       = "{estimate} ({std.error}){stars}",    # show just the coefficient
+  fmt            = 3,               # 3 digits
+  gof_omit        = "BIC|Std.Errors|RMSE|R2|R2 Adj.",              # drop goodness-of-fit if you like drop goodness-of-fit if you like
+  coef_rename    = c(               # optional: nicer row names
+    previous_birdie_or_better   = "Prev. Birdie",
+    average_strokes_above_par   = "Avg. Strokes Above Par",
+    par                          = "Hole Par"
+  ),
+  stars          = TRUE,            # significance stars
+  exponentiate       = TRUE,             # exponentiate coefficients,
+    notes         = "Significance: * p<0.1; ** p<0.05; *** p<0.01",
+  note_position = "bottom",
+  gof_function = gof_function_gof,
+)
+
+
+theme_set(theme_sjplot())
+pdf("visualizations/marginal_effect_single.pdf")
+
+modelplot(glm_birdie_or_better_model_4, exponentiate = T)
+modelplot(glm_bogey_or_worst_model_4, exponentiate = T)
+
+dev.off()
+
+sink("tables/glm_vif.txt")
+vif(glm(bogey_or_worst ~ previous_bogey_or_worst + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial))
+vif(glm(birdie_or_better ~ previous_birdie_or_better + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial))
+sink()
+```
+
+
