@@ -6,6 +6,7 @@ All data used in this project are derived from official **scorecard data**.
 ---
 
 ## Repository Structure
+```
 data/                  # Raw scorecard data (source files)
 LICENSE                # License for this repository
 
@@ -32,7 +33,7 @@ lpga_vs_pga/
 3. **Outputs**  
    - **Tables** summarizing regression results are saved in `lpga_vs_pga/tables/`.  
    - **Visualizations** (e.g., density plots, state probabilities) are saved in `lpga_vs_pga/visualizations/`.
-
+```
 ---
 
 ## Requirements
