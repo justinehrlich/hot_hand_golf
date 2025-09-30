@@ -17,7 +17,7 @@ lpga_vs_pga/
 ├── logit_analysis.Rmd # Logistic regression with fixed effects
 ├── tables/            # Output tables from models
 └── visualizations/    # Plots and figures generated from analyses
-
+```
 ---
 
 ## Workflow
@@ -33,7 +33,7 @@ lpga_vs_pga/
 3. **Outputs**  
    - **Tables** summarizing regression results are saved in `lpga_vs_pga/tables/`.  
    - **Visualizations** (e.g., density plots, state probabilities) are saved in `lpga_vs_pga/visualizations/`.
-```
+
 ---
 
 ## Requirements
