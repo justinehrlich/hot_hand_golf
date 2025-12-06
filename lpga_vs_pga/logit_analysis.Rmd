@@ -222,8 +222,8 @@ scorecards_cleaned_all <- readRDS("data/scorecards_cleaned_all.rds")
 
 scorecards_cleaned_all %>% group_by(par) %>% mutate(n_shots = n()) %>% ungroup() %>% group_by(par, previous_large_bucket_hole_outcome) %>% summarize(n_cases = n(), n_shots = first(n_shots)) %>% mutate(prob = n_cases/n_shots)
 
-scorecards_cleaned_all %>% mutate(previous_birdie_or_better = as.numeric(as.character(previous_birdie_or_better)), previous_bogey_or_worst = as.numeric(as.character(previous_bogey_or_worst))) %>%  filter(!is.na(par)) %>% select(season, previous_birdie_or_better, previous_bogey_or_worst, par, strokes_gained, birdie_or_better, bogey_or_worst, ) %>% 
-  tbl_summary(missing = "no", by = par)
+scorecards_cleaned_all %>% mutate(previous_birdie_or_better = as.numeric(as.character(previous_birdie_or_better)), previous_bogey_or_worst = as.numeric(as.character(previous_bogey_or_worst))) %>%  filter(!is.na(par)) %>% select(season,orgId, par, previous_birdie_or_better, previous_bogey_or_worst,  strokes_gained, birdie_or_better, bogey_or_worst, ) %>% 
+  tbl_summary(missing = "no", by = orgId)
 
 
 
@@ -373,7 +373,8 @@ modelsummary(
   ),
   stars          = TRUE,            # significance stars
   exponentiate       = TRUE,             # exponentiate coefficients,
-    notes         = "Significance: * p<0.1; ** p<0.05; *** p<0.01",
+    notes          = list("Coefficients are odds ratios. RE = Random Effects.",
+                        "*** p<0.001; ** p<0.01; * p<0.05"),
   note_position = "bottom",
   gof_function = gof_function_gof,
 )
@@ -424,7 +425,8 @@ modelsummary(
   ),
   stars          = TRUE,            # significance stars
   exponentiate       = TRUE,             # exponentiate coefficients,
-    notes         = "Significance: * p<0.1; ** p<0.05; *** p<0.01",
+      notes          = list("Coefficients are odds ratios. RE = Random Effects.",
+                        "*** p<0.001; ** p<0.01; * p<0.05"),
   note_position = "bottom",
   gof_function = gof_function_gof,
 )
@@ -442,6 +444,233 @@ sink("tables/glm_vif.txt")
 vif(glm(bogey_or_worst ~ previous_bogey_or_worst + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial))
 vif(glm(birdie_or_better ~ previous_birdie_or_better + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial))
 sink()
+```
+
+random effects version (very slow)
+
+Why the original FE model is fine:
+No multicollinearity because:
+
+Different hierarchical levels:
+
+playerId^season = player-season FEs
+orgId^season^tournId^roundId = event-round FEs
+standing_hole = hole-standing FEs
+These are NOT linear combinations of each other
+
+
+The interaction previous_birdie_or_better:orgId is identified:
+
+It's testing a slope difference (does momentum effect differ by tour?)
+NOT an intercept difference
+previous_birdie_or_better varies within player-seasons (hole to hole)
+Player FEs absorb level differences between tours, but NOT slope differences
+
+
+
+The key insight:
+Even though players never switch between LPGA/PGA:
+
+Main effect of orgId: NOT identified (absorbed by player FEs) ✗
+Interaction previous_birdie_or_better:orgId: IS identified ✓
+
+Player fixed effects control for "Dustin Johnson is better than average" but don't prevent you from testing "Does a previous birdie boost performance more on the PGA than LPGA?"
+So which model should you use?
+Both are valid! The choice is conceptual:
+Fixed effects (playerId^season):
+
+More conservative
+"Within player-season, does momentum differ by tour?"
+Larger standard errors
+
+Random effects ((1|playerId)):
+
+More efficient
+"Across all players, does momentum differ by tour?"
+Assumes player effects are randomly distributed
+
+to be added to the paper: While players never switch between tours (LPGA vs PGA), the fixed effects specification does not suffer from multicollinearity. The playerId^season fixed effects absorb tour-level differences in average performance, but the interaction term previous_birdie_or_better:orgId tests for slope differences in the momentum effect between tours, which varies within players across holes and is therefore identified. As a robustness check, we estimated models with random effects for player and event-round (using glmmTMB), which produced substantively similar coefficient estimates and standard errors, confirming that our fixed effects results are not driven by the modeling approach (see Appendix 1 for comparison tables).
+
+```{r}
+library(glmmTMB)
+library(dplyr)
+library(modelsummary)
+
+# Data prep
+scorecards_cleaned_all %>% 
+  filter(!is.na(playerId)) %>%
+  mutate(
+    strokes_back_hole = as.character(strokes_back_hole),
+    previous_bogey_or_worst = as.numeric(as.character(previous_bogey_or_worst)),
+    previous_birdie_or_better = as.numeric(as.character(previous_birdie_or_better)),
+    standing_hole = as.factor(standing_hole),
+    # Create event-round identifier for random effects
+    event_round = paste(orgId, season, tournId, roundId, sep = "_")
+  ) -> scorecards_cleaned_all
+
+# ============================================================
+# BOGEY OR WORST MODELS
+# ============================================================
+
+# Model 1: No effects
+glm_bogey_or_worst_model_1 <- glm(
+  bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + 
+    average_strokes_above_par + par,
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 2: Player random effects only
+glm_bogey_or_worst_model_2 <- glmmTMB(
+  bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + 
+    average_strokes_above_par + par + (1|playerId),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 3: Player RE + Event-Round RE
+glm_bogey_or_worst_model_3 <- glmmTMB(
+  bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + 
+    average_strokes_above_par + par + (1|playerId) + (1|event_round),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 4: Event-Round RE only
+glm_bogey_or_worst_model_4 <- glmmTMB(
+  bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + 
+    average_strokes_above_par + par + (1|event_round),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 5: Player RE + Event-Round RE + Standing Hole FE
+glm_bogey_or_worst_model_5 <- glmmTMB(
+  bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + 
+    average_strokes_above_par + par + standing_hole +
+    (1|playerId) + (1|event_round),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Assign to shorter names
+m1 <- glm_bogey_or_worst_model_1
+m2 <- glm_bogey_or_worst_model_2
+m3 <- glm_bogey_or_worst_model_3
+m4 <- glm_bogey_or_worst_model_4
+m5 <- glm_bogey_or_worst_model_5
+
+# Create model list
+models <- list(
+  "No RE"                                    = m1,
+  "Event Round RE"                           = m4,
+  "Player RE"                                = m2,
+  "Player + Event Round RE"                  = m3,
+  "Player + Event Round RE + Hole Standings" = m5
+)
+
+# Create table
+modelsummary(
+  models,
+  output         = "tables/glm_bogey_or_worst_re.html",
+  statistic      = NULL,
+  estimate       = "{estimate} ({std.error}){stars}",
+  fmt            = 3,
+  coef_rename    = c(
+    previous_bogey_or_worst   = "Prev. Bogey",
+    average_strokes_above_par = "Avg. Strokes Above Par",
+    par                       = "Hole Par"
+  ),
+  stars          = TRUE,
+  exponentiate   = TRUE,
+  notes          = list("Coefficients are odds ratios. RE = Random Effects.",
+                        "*** p<0.001; ** p<0.01; * p<0.05"),
+  note_position  = "bottom",
+  coef_omit = "standing_hole",
+  gof_omit = "Std.Errors|Log.Lik|AIC|BIC,ICC,F,R2 Marg|R2 Cond|ICC|Log\\.Lik|^F$|RMSE",
+)
+
+# ============================================================
+# BIRDIE OR BETTER MODELS
+# ============================================================
+
+# Model 1: No effects
+glm_birdie_or_better_model_1 <- glm(
+  birdie_or_better ~ previous_birdie_or_better:orgId + previous_birdie_or_better + 
+    average_strokes_above_par + par,
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 2: Player random effects only
+glm_birdie_or_better_model_2 <- glmmTMB(
+  birdie_or_better ~ previous_birdie_or_better:orgId + previous_birdie_or_better + 
+    average_strokes_above_par + par + (1|playerId),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 3: Player RE + Event-Round RE
+glm_birdie_or_better_model_3 <- glmmTMB(
+  birdie_or_better ~ previous_birdie_or_better:orgId + previous_birdie_or_better + 
+    average_strokes_above_par + par + (1|playerId) + (1|event_round),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 4: Event-Round RE only
+glm_birdie_or_better_model_4 <- glmmTMB(
+  birdie_or_better ~ previous_birdie_or_better:orgId + previous_birdie_or_better + 
+    average_strokes_above_par + par + (1|event_round),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Model 5: Player RE + Event-Round RE + Standing Hole FE
+glm_birdie_or_better_model_5 <- glmmTMB(
+  birdie_or_better ~ previous_birdie_or_better:orgId + previous_birdie_or_better + 
+    average_strokes_above_par + par + standing_hole +
+    (1|playerId) + (1|event_round),
+  data = scorecards_cleaned_all,
+  family = binomial
+)
+
+# Assign to shorter names
+m1 <- glm_birdie_or_better_model_1
+m2 <- glm_birdie_or_better_model_2
+m3 <- glm_birdie_or_better_model_3
+m4 <- glm_birdie_or_better_model_4
+m5 <- glm_birdie_or_better_model_5
+
+# Create model list
+models <- list(
+  "No RE"                                    = m1,
+  "Event Round RE"                           = m4,
+  "Player RE"                                = m2,
+  "Player + Event Round RE"                  = m3,
+  "Player + Event Round RE + Hole Standings" = m5
+)
+
+# Create table
+modelsummary(
+  models,
+  output         = "tables/glm_birdie_or_better_re.html",
+  statistic      = NULL,
+  estimate       = "{estimate} ({std.error}){stars}",
+  fmt            = 3,
+  coef_rename    = c(
+    previous_birdie_or_better = "Prev. Birdie",
+    average_strokes_above_par = "Avg. Strokes Above Par",
+    par                       = "Hole Par"
+  ),
+  stars          = TRUE,
+  exponentiate   = TRUE,
+  notes          = list("Coefficients are odds ratios. RE = Random Effects.",
+                        "*** p<0.001; ** p<0.01; * p<0.05"),
+  note_position  = "bottom",
+  coef_omit = "standing_hole",
+  gof_omit = "Std.Errors|Log.Lik|AIC|BIC,ICC,F,R2 Marg|R2 Cond|ICC|Log\\.Lik|^F$|RMSE",
+)
 ```
 
 

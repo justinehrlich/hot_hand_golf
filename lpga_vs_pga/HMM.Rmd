@@ -1,7 +1,7 @@
 ---
-title: "HMM_v1"
+title: "HMM_v2"
 output: html_document
-date: "2025-09-23"
+date: "2025-09-30"
 ---
 
 ```{r setup, include=FALSE}
@@ -14,25 +14,19 @@ cards
 ```
 
 ```{r}
-summary(cards$strokes_gained_above_par)
-```
-
-```{r}
-# Order and create unique sequence IDs
 cards_prepped <- cards %>%
   arrange(playerId, year, tournId, DayIndex, holeOrderNumber) %>%
   group_by(playerId, year, tournId) %>%
   mutate(
-    sequence_id = cur_group_id(),   # unique player-year-tournament
+    sequence_id = cur_group_id(),   
     hole_index = row_number()
   ) %>%
   ungroup() %>%
-  filter(!is.na(strokes_gained_above_par)) %>%   # remove NAs
+  filter(!is.na(strokes_gained)) %>%   
   mutate(orgId = factor(orgId))
 ```
 
 ```{r}
-#Make it so that a sequence of holes must be at least a round long to be considered
 cards_prepped <- cards_prepped %>%
   group_by(sequence_id) %>%
   filter(n() > 17) %>%  
@@ -40,21 +34,24 @@ cards_prepped <- cards_prepped %>%
 ```
 
 ```{r}
+cards_prepped_pga <- cards_prepped %>% filter(orgId == "PGA")
+```
+
+
+```{r}
 # Cap extreme values at ±5
-cards_prepped$sg_cap <- pmax(pmin(cards_prepped$strokes_gained_above_par, 5), -5)
+cards_prepped$sg_cap <- pmax(pmin(cards_prepped$strokes_gained, 5), -5)
 
 # Standardize for numerical stability
 cards_prepped$sg_std <- scale(cards_prepped$sg_cap)
 ```
 
 ```{r}
-#Calculate ntimes vector
 ntimes_vec <- as.numeric(table(cards_prepped$sequence_id))
 summary(ntimes_vec)  
 ```
 
 ```{r}
-#Define HMM model
 n_states <- 2  # Hot vs Cold
 
 hmm_data <- cards_prepped %>%
@@ -62,17 +59,15 @@ hmm_data <- cards_prepped %>%
   dplyr::select(sg_std, orgId, sequence_id)
 
 hmm_model <- depmix(
-  response = sg_std ~ 1,        # Gaussian emission
+  response = sg_std ~ 1,
   data = hmm_data,
   nstates = n_states,
   family = gaussian(),
-  transition = ~ orgId,         # PGA vs LPGA affects transitions
   ntimes = ntimes_vec
 )
 ```
 
 ```{r}
-#Run HMM model
 set.seed(787654378)
 
 hmm_fit <- fit(
@@ -80,21 +75,13 @@ hmm_fit <- fit(
   emcontrol = em.control(maxit = 100, tol = 1e-6),  # control convergence
   verbose = TRUE
 )
-#Convergence at the first iteration indicates that the EM algorithm found no improvement from the initial log-likelihood. The model essentially settled at the trivial solution, with initial and transition probabilities around 0.5, meaning no persistent hot or cold state was detected. This suggests that the data do not provide evidence of a hot-hand effect.
-```
-
-```{r}
-#Get posterior probabilities
-posterior_probs <- posterior(hmm_fit)
-
-cards_with_states <- cbind(
-  cards_prepped %>% arrange(sequence_id, hole_index),
-  posterior_probs
-)
 ```
 
 ```{r}
 summary(hmm_fit)
-#Probabilities of switching to a hot or cold state are about 50/50. In other words, the model cannot detect hot from cold based on performance. 
 ```
+
+
+
+
 
