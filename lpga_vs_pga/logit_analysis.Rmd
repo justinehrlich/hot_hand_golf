@@ -306,15 +306,15 @@ scorecards_cleaned_all %>% mutate(standing_hole = as.factor(standing_hole)) -> s
 
 
 
-feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_1
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_bogey_or_worst_model_1
 
-feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_2
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_bogey_or_worst_model_2
 
-feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial(), fixef.rm = "singleton") -> glm_bogey_or_worst_model_3
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial(), fixef.rm = "singleton", cluster = ~playerId^season) -> glm_bogey_or_worst_model_3
 
-feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_4
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_bogey_or_worst_model_4
 
-feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId + standing_hole, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_bogey_or_worst_model_5
+feglm(bogey_or_worst ~ previous_bogey_or_worst:orgId + previous_bogey_or_worst + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId + standing_hole, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_bogey_or_worst_model_5
 
 
 
@@ -380,15 +380,15 @@ modelsummary(
 )
 
 
-feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_1
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_birdie_or_better_model_1
 
-feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | playerId^season, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_2
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | playerId^season, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_birdie_or_better_model_2
 
-feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par  | playerId^season + orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_3
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par  | playerId^season + orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_birdie_or_better_model_3
 
-feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_4
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | orgId^season^tournId^roundId, data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_birdie_or_better_model_4
 
-feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId + standing_hole , data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton") -> glm_birdie_or_better_model_5
+feglm(birdie_or_better ~ previous_birdie_or_better:orgId +  previous_birdie_or_better + average_strokes_above_par + par | playerId^season + orgId^season^tournId^roundId + standing_hole , data = scorecards_cleaned_all, family = binomial, fixef.rm = "singleton", cluster = ~playerId^season) -> glm_birdie_or_better_model_5
 
 
 
